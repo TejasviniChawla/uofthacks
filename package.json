@@ -1,0 +1,27 @@
+{
+  "name": "sentinella",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pre-Cognitive Content Safety Platform for Live Streaming",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "dev:backend": "npm run dev --workspace=apps/backend",
+    "dev:dashboard": "npm run dev --workspace=apps/dashboard",
+    "dev:extension": "npm run dev --workspace=apps/extension",
+    "build:extension": "npm run build --workspace=apps/extension"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "packageManager": "npm@10.8.0"
+}
