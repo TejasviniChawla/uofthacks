@@ -206,5 +206,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-Built with ❤️ for UofT Hacks by the Sentinella Team
+Built with ❤️ for UofT Hacks
+
 
