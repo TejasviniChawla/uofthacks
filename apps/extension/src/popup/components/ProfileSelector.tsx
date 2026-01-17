@@ -1,78 +1,37 @@
-import React, { useState, useEffect } from 'react';
-import { getProfiles, setActiveProfile } from '../../lib/storage';
-import type { UserProfile } from '../../types';
+import React, { useState } from 'react';
 
-interface ProfileSelectorProps {
-  currentProfile: UserProfile | null;
-  onChange: (profile: UserProfile) => void;
-}
-
-export function ProfileSelector({ currentProfile, onChange }: ProfileSelectorProps) {
-  const [profiles, setProfiles] = useState<UserProfile[]>([]);
+export function ProfileSelector() {
+  const [currentProfile, setCurrentProfile] = useState('Default');
   const [isOpen, setIsOpen] = useState(false);
 
-  useEffect(() => {
-    loadProfiles();
-  }, []);
-
-  const loadProfiles = async () => {
-    const loadedProfiles = await getProfiles();
-    setProfiles(loadedProfiles);
-  };
-
-  const handleSelect = async (profile: UserProfile) => {
-    await setActiveProfile(profile.id);
-    onChange(profile);
-    setIsOpen(false);
-  };
-
-  if (!currentProfile) return null;
+  const profiles = ['Default', 'Family Mode', 'Gaming', 'Maximum Safety'];
 
   return (
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 bg-dark-700/50 rounded-lg border border-dark-600 hover:border-dark-500 transition-colors text-sm"
+        className="text-sm font-medium hover:opacity-80 flex items-center gap-1"
       >
-        <span className="text-dark-300">{currentProfile.name}</span>
-        <svg 
-          className={`w-4 h-4 text-dark-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-          fill="none" 
-          stroke="currentColor" 
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+        {currentProfile}
+        <span className="text-xs">▼</span>
       </button>
-
+      
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 w-48 bg-dark-800 rounded-lg border border-dark-600 shadow-xl z-50 overflow-hidden animate-slide-in">
+        <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
           {profiles.map((profile) => (
             <button
-              key={profile.id}
-              onClick={() => handleSelect(profile)}
-              className={`w-full px-3 py-2 text-left text-sm flex items-center justify-between hover:bg-dark-700 transition-colors ${
-                profile.id === currentProfile.id ? 'bg-sentinel-500/10 text-sentinel-400' : 'text-dark-200'
+              key={profile}
+              onClick={() => {
+                setCurrentProfile(profile);
+                setIsOpen(false);
+              }}
+              className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 first:rounded-t-lg last:rounded-b-lg ${
+                profile === currentProfile ? 'bg-sentinella-primary bg-opacity-10 text-sentinella-primary' : ''
               }`}
             >
-              <span>{profile.name}</span>
-              {profile.isDefault && (
-                <span className="text-xs text-dark-500">Default</span>
-              )}
-              {profile.isLocked && (
-                <span className="text-xs">🔒</span>
-              )}
+              {profile}
             </button>
           ))}
-          
-          <div className="border-t border-dark-700">
-            <button 
-              className="w-full px-3 py-2 text-left text-sm text-dark-400 hover:text-dark-200 hover:bg-dark-700 transition-colors"
-              onClick={() => {/* TODO: Open profile manager */}}
-            >
-              + Create Profile
-            </button>
-          </div>
         </div>
       )}
     </div>

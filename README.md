@@ -1,211 +1,254 @@
-# 🛡️ Sentinella
+# Sentinella - Pre-Cognitive Content Safety Platform
 
-## Pre-Cognitive Content Safety Platform for Live Streaming
+> **Viewer-First AI-Powered Content Safety for Live Streaming**
 
-Sentinella is a viewer-controlled, AI-powered content safety layer that **predicts and filters unwanted content BEFORE it reaches the viewer's screen**. Unlike reactive moderation, we use a 5-10 second buffer to "see the future" and apply personalized filters.
+Sentinella is a pre-cognitive content safety layer that predicts and filters unwanted content **BEFORE** it reaches the viewer's screen. Unlike reactive moderation, we use a 5-10 second buffer to "see the future" and apply personalized filters.
 
-![Sentinella Banner](https://via.placeholder.com/800x400/0f172a/22c55e?text=SENTINELLA)
-
-### 🎯 The Problem
-
-- **Viewers** can't control what content they're exposed to on live streams
-- **Parents** can't always monitor what their kids are watching
-- **Streamers** accidentally leak PII (addresses, credit cards, emails)
-- **Accessibility users** (epilepsy, PTSD) have no advance warning for triggering content
-
-### 💡 Our Solution
-
-**Predictive Content Moderation** - We buffer the stream and analyze it BEFORE it reaches viewers, giving them time to prepare or filter content.
-
-## ✨ Features
+## 🎯 Key Features
 
 ### For Viewers (Browser Extension)
-- 🎛️ **Customizable Filters** - Profanity, violence, jumpscares, flashing lights, and more
-- ⚠️ **Early Warnings** - Get 3-5 second warnings before filtered content appears
-- 👁️ **Override Control** - Click to reveal filtered content if you want to see it
-- 🧠 **AI Learning** - Sentinella learns your preferences from your overrides
-- 👨‍👩‍👧 **Multiple Profiles** - "Just Me", "Kids Watching", "Late Night" modes
+- **5-Second Safety Buffer**: Content is analyzed and filtered before it appears
+- **Personalized Filters**: Control profanity, violence, jumpscares, flashing lights, and more
+- **AI Learning**: System learns from your overrides and adjusts sensitivity automatically
+- **Real-time Warnings**: Get 3-5 second advance notice before intense content
+- **Override Control**: Click to reveal filtered content anytime
+- **Multiple Profiles**: Switch between "Gaming", "Family-Friendly", "Maximum Safety" presets
 
 ### For Streamers (Dashboard)
-- 🔒 **PII Auto-Detection** - Credit cards, addresses, emails auto-blurred before broadcast
-- 📊 **Tension Meter** - AI detects when you're frustrated and increases filter sensitivity
-- ✅ **Whitelist Management** - Allow your business email, P.O. Box, etc.
-- 📋 **Post-Stream Reports** - See all near-misses and get improvement recommendations
+- **PII Auto-Detection**: Automatically blurs credit cards, addresses, phone numbers, emails
+- **Emotional Trajectory Prediction**: Detects rising tension and increases filter sensitivity
+- **Post-Stream Safety Reports**: Review all near-miss moments
+- **Whitelist Management**: Allow specific safe elements (business email, P.O. Box)
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                       VIEWER SIDE                                │
-├─────────────────────────────────────────────────────────────────┤
-│  Browser Extension → 5-Second Buffer → Filter Application       │
-│         ↓                                                        │
-│    WebSocket Connection                                          │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                         BACKEND                                  │
-├─────────────────────────────────────────────────────────────────┤
-│  Express API → AI Processing → User Preferences                 │
-│       ↓              ↓                                           │
-│  WebSocket     ┌─────────────┐    ┌─────────────┐               │
-│    Server      │ TWELVE LABS │    │  AMPLITUDE  │               │
-│                │   Marengo   │    │  Analytics  │               │
-│                │   Pegasus   │    │             │               │
-│                └─────────────┘    └─────────────┘               │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    VIEWER EXTENSION                          │
+│  (Chrome/Firefox) - Intercepts video, applies filters       │
+└───────────────────────┬─────────────────────────────────────┘
+                        │ WebSocket
+                        ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      BACKEND API                            │
+│  • WebSocket Server (Socket.io)                             │
+│  • Twelve Labs Integration (Marengo + Pegasus)              │
+│  • Amplitude Analytics                                       │
+│  • Adaptive Learning Engine                                  │
+└───────────────────────┬─────────────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  STREAMER DASHBOARD                          │
+│  (Next.js) - Real-time PII detection, tension monitoring    │
+└─────────────────────────────────────────────────────────────┘
 ```
-
-## 🛠️ Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| **Extension** | React 18, TypeScript, Vite, TailwindCSS |
-| **Dashboard** | Next.js 14, React, TailwindCSS, Recharts |
-| **Backend** | Node.js, Express, WebSocket, TypeScript |
-| **AI** | Twelve Labs Marengo (Video) + Pegasus (Audio) |
-| **Analytics** | Amplitude (Self-improving loop) |
-| **Monorepo** | Turborepo |
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 - Node.js 18+
-- npm 10+
+- FFmpeg (for video upload/censoring feature)
+- Twelve Labs API Key
+- Amplitude API Key (optional for demo)
+
+> **Note**: FFmpeg is required for video upload/censoring. If not installed, use `winget install --id=Gyan.FFmpeg -e` (Windows) or install via your package manager.
 
 ### Installation
 
 ```bash
-# Clone the repo
-git clone https://github.com/yourusername/sentinella.git
-cd sentinella
+# Clone repository
+cd Sentinella
 
-# Install dependencies
+# Install all dependencies
 npm install
 
-# Set up environment variables
+# Copy environment file
 cp .env.example .env
+
 # Edit .env with your API keys
+# TWELVE_LABS_API_KEY=your_key_here
+# AMPLITUDE_API_KEY=your_key_here
 ```
 
 ### Development
 
 ```bash
-# Start all services
-npm run dev
+# Start backend server
+npm run dev:backend
 
-# Or start individually:
-npm run dev:backend    # Backend API (port 3001)
-npm run dev:dashboard  # Streamer Dashboard (port 3000)
-npm run dev:extension  # Extension build watch
+# In another terminal, start extension build (watch mode)
+npm run dev:extension
+
+# In another terminal, start streamer dashboard
+npm run dev:dashboard
 ```
 
-### Build Extension
+### Load Extension
+
+1. Build the extension:
+   ```bash
+   cd apps/extension
+   npm run build
+   ```
+
+2. Open Chrome and go to `chrome://extensions/`
+3. Enable "Developer mode"
+4. Click "Load unpacked"
+5. Select `apps/extension/dist` folder
+
+6. Visit Twitch or YouTube and the extension will activate automatically
+
+### Video Upload & Profanity Censoring
+
+Upload videos to automatically detect and censor profanities:
 
 ```bash
-cd apps/extension
-npm run build
-# Load unpacked extension from apps/extension/dist
+# 1. Upload a video file
+curl -X POST -F "video=@your-video.mp4" http://localhost:3001/api/v1/video/upload
+# Response: { "videoId": "abc-123-...", ... }
+
+# 2. Process the video (detects profanities, applies censoring)
+curl -X POST http://localhost:3001/api/v1/video/process/abc-123-...
+
+# 3. Check processing status
+curl http://localhost:3001/api/v1/video/status/abc-123-...
+
+# 4. Download the censored video
+curl -O http://localhost:3001/api/v1/video/download/abc-123-...
 ```
+
+The system will:
+- Analyze video frames for visual profanity/PII (using Twelve Labs Marengo)
+- Analyze audio for profanity (using Twelve Labs Pegasus)
+- Apply blur to visual profanity and mute audio profanity
+- Return a censored video file
 
 ## 📁 Project Structure
 
 ```
 sentinella/
 ├── apps/
-│   ├── extension/          # Chrome Extension
+│   ├── extension/          # Browser Extension (PRIMARY)
 │   │   ├── src/
-│   │   │   ├── popup/      # React popup UI
-│   │   │   ├── content/    # Content scripts
-│   │   │   ├── background/ # Service worker
-│   │   │   └── lib/        # Shared utilities
+│   │   │   ├── background/ # Service Worker
+│   │   │   ├── content/    # Content Scripts (Video Interception)
+│   │   │   ├── popup/      # React Popup UI
+│   │   │   └── lib/        # WebSocket, Amplitude clients
 │   │   └── manifest.json
 │   │
-│   ├── dashboard/          # Next.js Streamer Dashboard
+│   ├── dashboard/          # Streamer Dashboard (SECONDARY)
 │   │   └── src/
-│   │       ├── app/        # App router pages
-│   │       ├── components/ # React components
-│   │       └── lib/        # API utilities
+│   │       ├── app/         # Next.js App Router
+│   │       └── components/ # Dashboard Components
 │   │
-│   └── backend/            # Express + WebSocket API
+│   └── backend/            # Backend API
 │       └── src/
-│           ├── routes/     # API endpoints
-│           ├── services/   # Business logic
-│           ├── websocket/  # Real-time handling
-│           └── db/         # Data stores
+│           ├── services/   # Twelve Labs, Moderation, Learning
+│           ├── analytics/  # Amplitude integration
+│           └── index.js    # Express + WebSocket server
 │
 └── packages/
-    └── shared/             # Shared types & constants
+    └── shared/             # Shared TypeScript types
 ```
 
-## 🔑 Environment Variables
-
-```env
-# Backend
-TWELVE_LABS_API_KEY=your_api_key
-AMPLITUDE_API_KEY=your_api_key
-PORT=3001
-
-# Extension & Dashboard
-VITE_API_URL=http://localhost:3001
-VITE_WS_URL=ws://localhost:3001
-NEXT_PUBLIC_API_URL=http://localhost:3001
-```
-
-## 🎬 Demo Flow
-
-1. **Open Twitch/YouTube** with the extension installed
-2. **See the indicator** showing Sentinella is active
-3. **Content gets analyzed** in the 5-second buffer
-4. **Warning appears** 3-5 seconds before filtered content
-5. **Choose to reveal or keep filtered**
-6. **Watch AI learn** from your overrides
-7. **Get notified** when Sentinella adjusts your preferences
-
-## 🏆 Hackathon Tracks
+## 🎯 Hackathon Demo Flow
 
 ### Twelve Labs Track
-- **Marengo**: Visual PII detection, content moderation, scene analysis
-- **Pegasus**: Audio analysis, emotional trajectory, profanity detection
-- **Search**: Post-stream safety analysis for near-misses
+1. **Show Predictive Moderation**: Extension detects profanity BEFORE it's heard
+2. **Visual PII Detection**: Auto-blur credit cards/addresses in real-time
+3. **Emotional Trajectory**: Show tension meter rising, filters auto-adjusting
+4. **Post-Stream Search**: Use Twelve Labs search to find near-misses
 
 ### Amplitude Track
-- **Self-Improving Loop**: Override tracking → Pattern detection → Sensitivity adjustment
-- **Visible AI Learning**: Real-time UI showing what the AI learned
-- **Complete Event Schema**: 15+ event types tracking all user interactions
+1. **Event Flow**: Show complete event tracking in Amplitude dashboard
+2. **Sensitivity Auto-Adjustment**: Override filter 5 times → AI reduces sensitivity → Notification appears
+3. **AI Learning Panel**: Show visible UI with learned preferences
+4. **Cohort Analysis**: Compare users who override vs. don't
 
-## 📊 Amplitude Event Flow
+## 🔧 Technology Stack
 
-```
-User overrides "cartoon violence" 5 times
-        ↓
-amplitude.track('filter_override', {...})
-        ↓
-System detects pattern (83% override rate)
-        ↓
-amplitude.track('override_pattern_detected', {...})
-        ↓
-AI generates recommendation
-        ↓
-Toast: "🧠 Reduced cartoon violence filtering"
-        ↓
-amplitude.track('sensitivity_auto_adjusted', {...})
-        ↓
-User accepts/rejects
-        ↓
-amplitude.track('sensitivity_adjustment_response', {...})
-```
+- **Frontend (Extension)**: React 18 + TypeScript + TailwindCSS
+- **Backend**: Node.js + Express + Socket.io
+- **Dashboard**: Next.js 14 (App Router)
+- **AI/ML**: Twelve Labs (Marengo + Pegasus)
+- **Analytics**: Amplitude
+- **Database**: PostgreSQL (schema provided, optional for MVP)
 
-## 🤝 Contributing
+## 📊 API Endpoints
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+### Viewer Extension
+- `POST /api/v1/analyze/frame` - Analyze video frame
+- `POST /api/v1/analyze/audio` - Analyze audio chunk
+- `GET /api/v1/user/preferences` - Get user filter settings
+- `PUT /api/v1/user/preferences` - Update filter settings
+- `POST /api/v1/events/override` - Track filter override
+
+### Streamer Dashboard
+- `GET /api/v1/streamer/report/:streamId` - Get post-stream safety report
+
+### Video Upload & Censoring
+- `POST /api/v1/video/upload` - Upload a video file for processing
+- `POST /api/v1/video/process/:videoId` - Process uploaded video (detect and censor profanities)
+- `GET /api/v1/video/status/:videoId` - Check processing status
+- `GET /api/v1/video/download/:videoId` - Download censored video
+
+### WebSocket Events
+- `join-stream` - Join a stream session
+- `frame_analysis` - Send frame for analysis
+- `audio_analysis` - Send audio for analysis
+- `filter_instruction` - Receive filter instructions
+- `filter_override` - Override a filter
+- `sensitivity_adjusted` - Receive sensitivity adjustment notification
+
+## 🧠 AI Learning System
+
+The adaptive learning system tracks user overrides and automatically adjusts filter sensitivity:
+
+1. **User Action**: Viewer overrides "violence-cartoon" filter 5 times
+2. **Pattern Detection**: System detects consistent override pattern
+3. **Recommendation**: AI suggests reducing sensitivity by 20%
+4. **User Notification**: Toast appears: "🧠 Sentinella noticed you often allow cartoon violence. Sensitivity has been reduced."
+5. **Confirmation**: User can accept or reject the change
+
+## 📝 Environment Variables
+
+See `.env.example` for all required environment variables.
+
+## 🎨 UI/UX Highlights
+
+- **Non-intrusive**: Filters apply seamlessly without breaking viewing experience
+- **Transparent**: Users see exactly what's being filtered and why
+- **Control**: Easy override with one click
+- **Learning**: Visible AI learning status panel
+- **Stats**: Real-time session statistics
+
+## 🏆 Hackathon Winning Criteria
+
+### Twelve Labs Track
+✅ **Twelve Labs API Use**: Marengo for visual PII, Pegasus for audio + emotional trajectory  
+✅ **Impact & Usefulness**: Real-world use case protecting streamers & viewers  
+✅ **Wow Factor**: PREDICTIVE moderation - filter BEFORE content appears  
+✅ **Technical Depth**: Real-time processing pipeline, emotional trajectory prediction  
+✅ **UX Quality**: Clean extension popup, intuitive overlays
+
+### Amplitude Track
+✅ **Behavioral Data**: Comprehensive event schema tracking all interactions  
+✅ **AI Application**: Self-improving sensitivity based on override patterns  
+✅ **Product Impact**: Personalized viewing experience that learns preferences  
+✅ **Innovation**: Perfect "data → insights → action" loop demonstration  
+✅ **Execution**: Visible UI showing AI learning in real-time
 
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT
+
+## 🙏 Acknowledgments
+
+Built for hackathon with:
+- **Twelve Labs** - Video and audio understanding
+- **Amplitude** - Behavioral analytics and insights
 
 ---
 
-Built with ❤️ for UofT Hacks
-
-
+**Made with ❤️ for safer streaming**

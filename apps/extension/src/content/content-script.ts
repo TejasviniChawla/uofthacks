@@ -1,313 +1,278 @@
+// Main Content Script - Orchestrates video interception, buffering, and filtering
+
 import { VideoInterceptor } from './video-interceptor';
 import { BufferManager } from './buffer-manager';
 import { FilterApplier } from './filter-applier';
 import { OverlayManager } from './overlay-manager';
-import { wsClient } from '../lib/websocket';
-import { amplitude } from '../lib/amplitude';
-import { getUserId, getActiveProfile, incrementFiltered, incrementRevealed } from '../lib/storage';
-import type { WSMessage, FilterInstruction, Detection, AIAdjustment } from '../types';
+import { WebSocketClient } from '../lib/websocket';
+import { trackFilterTriggered, trackFilterOverride } from '../lib/amplitude';
+import type { FilterInstruction, Detection } from '@shared/types';
+
+// Detect platform
+function detectPlatform(): 'twitch' | 'youtube' | null {
+  const hostname = window.location.hostname;
+  if (hostname.includes('twitch.tv')) return 'twitch';
+  if (hostname.includes('youtube.com')) return 'youtube';
+  return null;
+}
+
+// Find video element
+function findVideoElement(): HTMLVideoElement | null {
+  // Try Twitch selector
+  const twitchVideo = document.querySelector('video[data-a-target="player-video"]') as HTMLVideoElement;
+  if (twitchVideo) return twitchVideo;
+
+  // Try YouTube selector
+  const youtubeVideo = document.querySelector('video.html5-main-video') as HTMLVideoElement;
+  if (youtubeVideo) return youtubeVideo;
+
+  // Fallback: find any video element
+  return document.querySelector('video') as HTMLVideoElement;
+}
 
 class SentinellaContentScript {
-  private videoInterceptor: VideoInterceptor | null = null;
-  private bufferManager: BufferManager | null = null;
+  private videoInterceptor: VideoInterceptor;
+  private bufferManager: BufferManager;
   private filterApplier: FilterApplier | null = null;
   private overlayManager: OverlayManager | null = null;
+  private wsClient: WebSocketClient | null = null;
+  private videoElement: HTMLVideoElement | null = null;
   private platform: 'twitch' | 'youtube' | null = null;
-  private initialized = false;
+  private isActive: boolean = false;
+  private sessionStats = {
+    itemsFiltered: 0,
+    itemsByCategory: {} as Record<string, number>,
+    itemsRevealed: 0,
+    overrides: 0
+  };
 
-  async init() {
-    if (this.initialized) return;
+  constructor() {
+    this.videoInterceptor = new VideoInterceptor();
+    this.bufferManager = new BufferManager(5000); // 5 second buffer
+    this.platform = detectPlatform();
+  }
 
-    // Detect platform
-    this.platform = this.detectPlatform();
+  async initialize() {
     if (!this.platform) {
-      console.log('[Sentinella] Not on a supported platform');
+      console.log('Sentinella: Platform not supported');
       return;
     }
 
-    console.log(`[Sentinella] Initializing on ${this.platform}`);
-
-    // Get user ID and profile
-    const userId = await getUserId();
-    const profile = await getActiveProfile();
-
-    // Initialize Amplitude
-    amplitude.init(userId);
-    amplitude.trackSessionStart(
-      this.platform,
-      profile.name,
-      profile.filters.filter(f => f.level !== 'off').length
-    );
-
-    // Wait for video element
-    const video = await this.waitForVideo();
-    if (!video) {
-      console.error('[Sentinella] Could not find video element');
+    // Find video element
+    this.videoElement = findVideoElement();
+    if (!this.videoElement) {
+      // Wait for video to load
+      const observer = new MutationObserver(() => {
+        this.videoElement = findVideoElement();
+        if (this.videoElement) {
+          observer.disconnect();
+          this.setupVideo();
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
       return;
     }
+
+    this.setupVideo();
+  }
+
+  private setupVideo() {
+    if (!this.videoElement) return;
 
     // Initialize components
-    this.bufferManager = new BufferManager(5000); // 5 second buffer
-    this.filterApplier = new FilterApplier(video);
-    this.overlayManager = new OverlayManager(video);
-    this.videoInterceptor = new VideoInterceptor(video, this.bufferManager);
+    this.filterApplier = new FilterApplier(this.videoElement);
+    const container = this.videoElement.parentElement || document.body;
+    this.overlayManager = new OverlayManager(container);
 
-    // Connect to WebSocket
-    wsClient.connect(userId, this.platform);
+    // Attach video interceptor
+    this.videoInterceptor.attachToVideo(this.videoElement);
 
-    // Listen for WebSocket messages
-    wsClient.onMessage((message) => this.handleWSMessage(message));
-
-    // Start capturing frames
-    this.videoInterceptor.startCapture((frame, timestamp) => {
-      wsClient.sendFrame(frame, timestamp);
-    });
-
-    // Inject overlay styles
-    this.injectStyles();
-
-    this.initialized = true;
-    console.log('[Sentinella] Content script initialized');
-  }
-
-  private detectPlatform(): 'twitch' | 'youtube' | null {
-    const hostname = window.location.hostname;
-    if (hostname.includes('twitch.tv')) return 'twitch';
-    if (hostname.includes('youtube.com')) return 'youtube';
-    return null;
-  }
-
-  private async waitForVideo(): Promise<HTMLVideoElement | null> {
-    const selectors = {
-      twitch: 'video',
-      youtube: 'video.html5-main-video',
-    };
-
-    const selector = this.platform ? selectors[this.platform] : 'video';
-
-    // Try immediately
-    let video = document.querySelector<HTMLVideoElement>(selector);
-    if (video) return video;
-
-    // Wait and retry
-    return new Promise((resolve) => {
-      let attempts = 0;
-      const maxAttempts = 50; // 10 seconds max
-
-      const interval = setInterval(() => {
-        video = document.querySelector<HTMLVideoElement>(selector);
-        if (video || attempts >= maxAttempts) {
-          clearInterval(interval);
-          resolve(video || null);
-        }
-        attempts++;
-      }, 200);
-    });
-  }
-
-  private handleWSMessage(message: WSMessage) {
-    switch (message.type) {
-      case 'filter_instruction':
-        this.handleFilterInstructions(message.payload);
-        break;
-
-      case 'ai_adjustment':
-        this.handleAIAdjustment(message.payload);
-        break;
-
-      case 'session_stats':
-        // Stats are handled by popup
-        break;
-
-      case 'error':
-        console.error('[Sentinella] Server error:', message.payload.error);
-        break;
-    }
-  }
-
-  private async handleFilterInstructions(payload: {
-    instructions: FilterInstruction[];
-    detections: Detection[];
-    bufferPosition: number;
-  }) {
-    const { instructions, detections } = payload;
-
-    for (const instruction of instructions) {
-      const detection = detections.find(d => d.id === instruction.detectionId);
-      if (!detection) continue;
-
-      // Show warning overlay
-      this.overlayManager?.showWarning(
-        detection.type,
-        detection.subtype,
-        instruction.startTime,
-        () => this.handleReveal(detection, instruction),
-        () => this.handleKeepFiltered(detection, instruction)
+    // Set up frame capture callback
+    this.videoInterceptor.onFrame((frame, timestamp) => {
+      this.bufferManager.addFrame(
+        this.base64ToImageData(frame),
+        timestamp
       );
 
-      // Schedule filter application
-      this.bufferManager?.scheduleFilter(instruction, () => {
-        this.filterApplier?.applyFilter(instruction);
-        incrementFiltered(detection.type);
+      // Send frame for analysis
+      if (this.wsClient?.isConnected()) {
+        this.wsClient.sendFrameAnalysis(frame, timestamp);
+      }
+    });
+
+    // Initialize WebSocket connection
+    this.connectWebSocket();
+
+    // Listen for filter instructions
+    if (this.wsClient) {
+      this.wsClient.onFilterInstruction((instruction) => {
+        this.handleFilterInstruction(instruction);
       });
+
+      this.wsClient.onWarning((warning) => {
+        this.showWarning(warning.category, warning.countdown);
+      });
+    }
+
+    this.isActive = true;
+    console.log('✅ Sentinella content script initialized');
+  }
+
+  private async connectWebSocket() {
+    const userId = await this.getUserId();
+    this.wsClient = new WebSocketClient(userId);
+
+    try {
+      await this.wsClient.connect();
+      const streamId = this.getStreamId();
+      if (streamId) {
+        this.wsClient.joinStream(streamId, this.platform!);
+      }
+    } catch (error) {
+      console.error('Failed to connect WebSocket:', error);
     }
   }
 
-  private handleReveal(detection: Detection, instruction: FilterInstruction) {
-    // Cancel the scheduled filter
-    this.bufferManager?.cancelFilter(instruction.detectionId);
-    
+  private async getUserId(): Promise<string> {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['userId'], (result) => {
+        if (result.userId) {
+          resolve(result.userId);
+        } else {
+          const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          chrome.storage.local.set({ userId });
+          resolve(userId);
+        }
+      });
+    });
+  }
+
+  private getStreamId(): string {
+    // Extract stream ID from URL
+    const url = window.location.href;
+    if (this.platform === 'twitch') {
+      const match = url.match(/twitch\.tv\/([^/?]+)/);
+      return match ? match[1] : 'unknown';
+    } else if (this.platform === 'youtube') {
+      const match = url.match(/[?&]v=([^&]+)/);
+      return match ? match[1] : 'unknown';
+    }
+    return 'unknown';
+  }
+
+  private base64ToImageData(base64: string): ImageData {
+    // Simplified - in production, properly convert base64 to ImageData
+    const img = new Image();
+    img.src = base64;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+    canvas.width = img.width || 1920;
+    canvas.height = img.height || 1080;
+    ctx.drawImage(img, 0, 0);
+    return ctx.getImageData(0, 0, canvas.width, canvas.height);
+  }
+
+  private handleFilterInstruction(instruction: FilterInstruction) {
+    if (!this.filterApplier) return;
+
+    // Apply filter
+    this.filterApplier.applyFilter(instruction);
+
+    // Update stats
+    this.sessionStats.itemsFiltered++;
+    this.updateStatsDisplay();
+
+    // Track event
+    trackFilterTriggered({
+      filterCategory: 'unknown', // Would come from detection
+      confidenceScore: 0.8,
+      detectionModel: 'marengo',
+      streamPlatform: this.platform || 'unknown',
+      timeInStream: this.videoElement?.currentTime || 0,
+      bufferTimeRemaining: 4.0
+    });
+
+    // Add reveal button
+    if (instruction.bbox && this.overlayManager) {
+      this.overlayManager.addRevealButton(
+        instruction.detectionId,
+        instruction.bbox,
+        () => this.handleReveal(instruction.detectionId)
+      );
+    }
+  }
+
+  private handleReveal(detectionId: string) {
+    if (!this.filterApplier) return;
+
+    // Remove filter
+    this.filterApplier.removeFilter(detectionId);
+
+    // Remove reveal button
+    this.overlayManager?.removeRevealButton(detectionId);
+
+    // Update stats
+    this.sessionStats.itemsRevealed++;
+    this.sessionStats.overrides++;
+    this.updateStatsDisplay();
+
     // Track override
-    wsClient.sendOverride(detection.type, detection.subtype, 'reveal_once');
-    incrementRevealed();
+    trackFilterOverride({
+      filterCategory: 'unknown',
+      overrideType: 'reveal_once',
+      timeToOverride: 1.2,
+      sessionOverrideCount: this.sessionStats.overrides,
+      totalOverrideCount: this.sessionStats.overrides,
+      confidenceScore: 0.8
+    });
 
-    // Hide overlay
-    this.overlayManager?.hideWarning();
+    // Send override to backend
+    this.wsClient?.sendOverride(detectionId, 'reveal_once');
   }
 
-  private handleKeepFiltered(detection: Detection, instruction: FilterInstruction) {
-    // Filter will be applied as scheduled
-    this.overlayManager?.hideWarning();
-  }
+  private showWarning(category: string, countdown: number) {
+    if (!this.overlayManager) return;
 
-  private handleAIAdjustment(adjustment: AIAdjustment) {
-    this.overlayManager?.showAIAdjustment(
-      adjustment,
+    this.overlayManager.showWarning(
+      category,
+      countdown,
       () => {
-        // Accept adjustment
-        amplitude.trackAdjustmentResponse(adjustment.category, true, 'explicit_accept');
+        // Show anyway - user dismissed warning
+        console.log('User chose to show content');
       },
       () => {
-        // Reject adjustment
-        amplitude.trackAdjustmentResponse(adjustment.category, false, 'explicit_reject');
+        // Keep filtered - user wants to keep it hidden
+        console.log('User chose to keep content filtered');
       }
     );
   }
 
-  private injectStyles() {
-    const style = document.createElement('style');
-    style.textContent = `
-      .sentinella-overlay {
-        position: absolute;
-        z-index: 9999;
-        pointer-events: none;
-      }
+  private updateStatsDisplay() {
+    if (this.overlayManager) {
+      this.overlayManager.showStatsIndicator(this.sessionStats.itemsFiltered);
+    }
 
-      .sentinella-warning {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(34, 197, 94, 0.3);
-        border-radius: 12px;
-        padding: 20px 24px;
-        z-index: 10000;
-        pointer-events: auto;
-        font-family: 'Inter', system-ui, sans-serif;
-        animation: sentinella-fade-in 0.3s ease-out;
-      }
-
-      .sentinella-filter {
-        position: absolute;
-        pointer-events: none;
-        z-index: 9998;
-      }
-
-      .sentinella-blur {
-        backdrop-filter: blur(30px);
-        background: rgba(15, 23, 42, 0.3);
-      }
-
-      .sentinella-black-box {
-        background: #000;
-      }
-
-      .sentinella-dim {
-        background: rgba(0, 0, 0, 0.7);
-      }
-
-      .sentinella-indicator {
-        position: absolute;
-        bottom: 16px;
-        right: 16px;
-        background: rgba(15, 23, 42, 0.9);
-        border: 1px solid rgba(34, 197, 94, 0.3);
-        border-radius: 8px;
-        padding: 8px 12px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-family: 'Inter', system-ui, sans-serif;
-        font-size: 12px;
-        color: #e2e8f0;
-        z-index: 9997;
-      }
-
-      .sentinella-reveal-btn {
-        position: absolute;
-        bottom: 8px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(15, 23, 42, 0.9);
-        border: 1px solid rgba(100, 116, 139, 0.5);
-        border-radius: 6px;
-        padding: 4px 8px;
-        font-size: 11px;
-        color: #cbd5e1;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        z-index: 10001;
-      }
-
-      .sentinella-reveal-btn:hover {
-        background: rgba(30, 41, 59, 0.95);
-        border-color: rgba(34, 197, 94, 0.5);
-        color: #22c55e;
-      }
-
-      @keyframes sentinella-fade-in {
-        from {
-          opacity: 0;
-          transform: translate(-50%, -50%) scale(0.95);
-        }
-        to {
-          opacity: 1;
-          transform: translate(-50%, -50%) scale(1);
-        }
-      }
-
-      @keyframes sentinella-pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.5; }
-      }
-    `;
-    document.head.appendChild(style);
+    // Update storage
+    chrome.storage.local.set({ sessionStats: this.sessionStats });
   }
 
-  cleanup() {
-    this.videoInterceptor?.stopCapture();
-    wsClient.disconnect();
-    this.overlayManager?.cleanup();
-    this.filterApplier?.cleanup();
+  destroy() {
+    this.videoInterceptor.destroy();
+    this.filterApplier?.destroy();
+    this.overlayManager?.destroy();
+    this.wsClient?.disconnect();
   }
 }
 
-// Initialize
-const sentinella = new SentinellaContentScript();
-sentinella.init();
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    const sentinella = new SentinellaContentScript();
+    sentinella.initialize();
+  });
+} else {
+  const sentinella = new SentinellaContentScript();
+  sentinella.initialize();
+}
 
-// Cleanup on page unload
-window.addEventListener('beforeunload', () => {
-  sentinella.cleanup();
-});
-
-// Re-initialize on SPA navigation
-let lastUrl = location.href;
-new MutationObserver(() => {
-  if (location.href !== lastUrl) {
-    lastUrl = location.href;
-    sentinella.cleanup();
-    setTimeout(() => sentinella.init(), 1000);
-  }
-}).observe(document, { subtree: true, childList: true });
+export {};

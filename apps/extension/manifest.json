@@ -1,59 +1,51 @@
 {
   "manifest_version": 3,
-  "name": "Sentinella",
-  "description": "Pre-cognitive content safety for live streaming - filter unwanted content BEFORE it reaches your screen",
+  "name": "Sentinella - Pre-Cognitive Content Safety",
   "version": "1.0.0",
-  "icons": {
-    "16": "icons/icon16.png",
-    "32": "icons/icon32.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  },
-  "action": {
-    "default_popup": "popup.html",
-    "default_icon": {
-      "16": "icons/icon16.png",
-      "32": "icons/icon32.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
-    },
-    "default_title": "Sentinella - Content Safety"
-  },
+  "description": "AI-powered content safety that filters unwanted content BEFORE it reaches your screen",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://*.twitch.tv/*",
+    "https://*.youtube.com/*",
+    "http://localhost/*"
+  ],
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "background/service-worker.js",
     "type": "module"
   },
   "content_scripts": [
     {
       "matches": [
-        "https://www.twitch.tv/*",
-        "https://twitch.tv/*",
-        "https://www.youtube.com/*",
-        "https://youtube.com/*"
+        "https://*.twitch.tv/*",
+        "https://*.youtube.com/*"
       ],
-      "js": ["demo.js"],
-      "css": ["content.css"],
+      "js": ["content/content-script.js"],
+      "css": ["content/content.css"],
       "run_at": "document_idle"
     }
   ],
-  "permissions": [
-    "storage",
-    "activeTab",
-    "tabs",
-    "alarms"
-  ],
-  "host_permissions": [
-    "https://www.twitch.tv/*",
-    "https://twitch.tv/*",
-    "https://www.youtube.com/*",
-    "https://youtube.com/*",
-    "http://localhost:3001/*",
-    "ws://localhost:3001/*"
-  ],
+  "action": {
+    "default_popup": "popup/index.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "web_accessible_resources": [
     {
-      "resources": ["icons/*", "*.js", "*.css"],
-      "matches": ["<all_urls>"]
+      "resources": ["content/*.js", "content/*.css"],
+      "matches": ["https://*.twitch.tv/*", "https://*.youtube.com/*"]
     }
   ]
 }

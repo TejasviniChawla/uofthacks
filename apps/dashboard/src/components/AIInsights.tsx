@@ -1,58 +1,46 @@
 'use client';
 
-import { Brain, Lightbulb, TrendingUp } from 'lucide-react';
-
-interface Insight {
-  type: string;
-  title: string;
-  description: string;
-  icon: string;
-}
-
 interface AIInsightsProps {
-  insights: Insight[];
+  tensionLevel: number;
 }
 
-export function AIInsights({ insights }: AIInsightsProps) {
-  return (
-    <div className="glass-card p-6">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-          <Brain className="w-5 h-5 text-white" />
-        </div>
-        <div>
-          <h3 className="text-lg font-semibold text-white">AI Insights</h3>
-          <p className="text-sm text-dark-400">What Sentinella has learned about your stream</p>
-        </div>
-      </div>
+export function AIInsights({ tensionLevel }: AIInsightsProps) {
+  const insights = [
+    {
+      id: '1',
+      message: tensionLevel > 0.7
+        ? "Your tension levels spike during boss fights. I automatically increase profanity filtering during these moments."
+        : "Your stream is running smoothly. No automatic adjustments needed.",
+      type: tensionLevel > 0.7 ? 'warning' : 'info'
+    },
+    {
+      id: '2',
+      message: "You've whitelisted your business email 3 times. I've learned to always allow it.",
+      type: 'success'
+    }
+  ];
 
-      <div className="grid grid-cols-2 gap-4">
-        {insights.map((insight, index) => (
+  return (
+    <div className="bg-white rounded-lg shadow">
+      <div className="p-6 border-b border-gray-200">
+        <h2 className="text-xl font-semibold">🧠 AI INSIGHTS</h2>
+      </div>
+      <div className="p-6 space-y-4">
+        {insights.map((insight) => (
           <div
-            key={index}
-            className="p-4 bg-gradient-to-br from-purple-900/20 to-pink-900/10 rounded-xl border border-purple-500/20 hover:border-purple-500/40 transition-colors"
+            key={insight.id}
+            className={`p-4 rounded-lg ${
+              insight.type === 'warning'
+                ? 'bg-yellow-50 border border-yellow-200'
+                : insight.type === 'success'
+                ? 'bg-green-50 border border-green-200'
+                : 'bg-blue-50 border border-blue-200'
+            }`}
           >
-            <div className="flex items-start gap-3">
-              <span className="text-2xl">{insight.icon}</span>
-              <div>
-                <h4 className="font-medium text-white mb-1">{insight.title}</h4>
-                <p className="text-sm text-dark-300 leading-relaxed">{insight.description}</p>
-              </div>
-            </div>
+            <p className="text-sm text-gray-800">{insight.message}</p>
           </div>
         ))}
-      </div>
-
-      <div className="mt-4 p-4 bg-dark-800/30 rounded-xl border border-dark-700">
-        <div className="flex items-center gap-2 text-sm text-dark-400">
-          <TrendingUp className="w-4 h-4 text-sentinel-400" />
-          <span>
-            <span className="text-white font-medium">Pro tip:</span> Your tension levels are lowest during chatting segments. 
-            Consider taking breaks to reset!
-          </span>
-        </div>
       </div>
     </div>
   );
 }
-

@@ -1,347 +1,205 @@
-import type { FilterCategory, AIAdjustment } from '../types';
-
-const FILTER_ICONS: Record<FilterCategory, string> = {
-  profanity: '🔇',
-  violence: '🩸',
-  sexual: '🔞',
-  jumpscares: '⚡',
-  flashing: '💥',
-  spoilers: '🎮',
-  loud_audio: '📢',
-  hate_speech: '🚫',
-};
-
-const FILTER_LABELS: Record<FilterCategory, string> = {
-  profanity: 'Profanity',
-  violence: 'Violence',
-  sexual: 'Sexual Content',
-  jumpscares: 'Jumpscare',
-  flashing: 'Flashing',
-  spoilers: 'Spoiler',
-  loud_audio: 'Loud Audio',
-  hate_speech: 'Hate Speech',
-};
+// Overlay Manager - Manages warning overlays and reveal buttons
 
 export class OverlayManager {
-  private video: HTMLVideoElement;
-  private container: HTMLElement | null = null;
-  private warningOverlay: HTMLElement | null = null;
-  private indicatorOverlay: HTMLElement | null = null;
-  private adjustmentOverlay: HTMLElement | null = null;
-  private filteredCount = 0;
+  private overlayContainer: HTMLDivElement | null = null;
+  private activeWarnings: Map<string, HTMLDivElement> = new Map();
+  private revealButtons: Map<string, HTMLButtonElement> = new Map();
 
-  constructor(video: HTMLVideoElement) {
-    this.video = video;
-    this.createContainer();
-    this.createIndicator();
+  constructor(container: HTMLElement) {
+    this.createOverlayContainer(container);
   }
 
-  private createContainer() {
-    const videoContainer = this.video.parentElement;
-    if (!videoContainer) return;
-
-    this.container = document.createElement('div');
-    this.container.className = 'sentinella-overlay-container';
-    this.container.style.cssText = `
+  private createOverlayContainer(parent: HTMLElement) {
+    this.overlayContainer = document.createElement('div');
+    this.overlayContainer.id = 'sentinella-overlay-container';
+    this.overlayContainer.style.cssText = `
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
       pointer-events: none;
-      z-index: 9999;
+      z-index: 10000;
     `;
-
-    videoContainer.style.position = 'relative';
-    videoContainer.appendChild(this.container);
+    parent.appendChild(this.overlayContainer);
   }
 
-  private createIndicator() {
-    if (!this.container) return;
-
-    this.indicatorOverlay = document.createElement('div');
-    this.indicatorOverlay.className = 'sentinella-indicator';
-    this.indicatorOverlay.innerHTML = `
-      <span style="width: 8px; height: 8px; background: #22c55e; border-radius: 50%; animation: sentinella-pulse 2s infinite;"></span>
-      <span style="color: #22c55e; font-weight: 500;">Sentinella</span>
-      <span style="color: #94a3b8;">|</span>
-      <span class="filter-count" style="color: #cbd5e1;">0 filtered</span>
-    `;
-
-    this.container.appendChild(this.indicatorOverlay);
-  }
-
-  /**
-   * Show warning overlay before content is filtered
-   */
-  showWarning(
-    category: FilterCategory,
-    subcategory: string | undefined,
-    triggerTime: number,
-    onReveal: () => void,
-    onKeep: () => void
-  ) {
-    if (!this.container) return;
-
-    // Remove existing warning
-    this.hideWarning();
-
-    const countdown = Math.max(0, Math.ceil((triggerTime - Date.now()) / 1000));
-
-    this.warningOverlay = document.createElement('div');
-    this.warningOverlay.className = 'sentinella-warning';
-    this.warningOverlay.style.pointerEvents = 'auto';
-    this.warningOverlay.innerHTML = `
-      <div style="text-align: center;">
-        <div style="font-size: 24px; margin-bottom: 8px;">⚠️</div>
-        <div style="font-size: 14px; font-weight: 600; color: #f8fafc; margin-bottom: 4px;">
-          CONTENT WARNING
-        </div>
-        <div style="font-size: 13px; color: #cbd5e1; margin-bottom: 12px;">
-          <span style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; padding: 2px 8px; border-radius: 4px;">
-            ${FILTER_ICONS[category]} ${FILTER_LABELS[category]}${subcategory ? ` - ${subcategory}` : ''}
-          </span>
-          detected
-        </div>
-        <div style="font-size: 12px; color: #64748b; margin-bottom: 16px;">
-          Filtering in: <span class="countdown" style="color: #fbbf24; font-weight: 600;">${countdown}</span> seconds
-        </div>
-        <div style="display: flex; gap: 8px;">
-          <button class="show-btn" style="
-            flex: 1;
-            padding: 8px 16px;
-            background: transparent;
-            border: 1px solid #475569;
-            border-radius: 6px;
-            color: #e2e8f0;
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.15s ease;
-          ">
-            👁️ Show Anyway
-          </button>
-          <button class="keep-btn" style="
-            flex: 1;
-            padding: 8px 16px;
-            background: #22c55e;
-            border: none;
-            border-radius: 6px;
-            color: white;
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.15s ease;
-          ">
-            ✓ Keep Filtered
-          </button>
-        </div>
-      </div>
-    `;
-
-    // Add event listeners
-    const showBtn = this.warningOverlay.querySelector('.show-btn') as HTMLButtonElement;
-    const keepBtn = this.warningOverlay.querySelector('.keep-btn') as HTMLButtonElement;
-
-    showBtn.addEventListener('click', () => {
-      onReveal();
-      this.hideWarning();
-    });
-
-    keepBtn.addEventListener('click', () => {
-      onKeep();
-      this.hideWarning();
-      this.incrementFilterCount();
-    });
-
-    // Hover effects
-    showBtn.addEventListener('mouseover', () => {
-      showBtn.style.borderColor = '#22c55e';
-      showBtn.style.color = '#22c55e';
-    });
-    showBtn.addEventListener('mouseout', () => {
-      showBtn.style.borderColor = '#475569';
-      showBtn.style.color = '#e2e8f0';
-    });
-
-    this.container.appendChild(this.warningOverlay);
-
-    // Countdown timer
-    const countdownEl = this.warningOverlay.querySelector('.countdown');
-    let remaining = countdown;
-    const interval = setInterval(() => {
-      remaining--;
-      if (countdownEl) countdownEl.textContent = String(remaining);
-      if (remaining <= 0) {
-        clearInterval(interval);
-        this.hideWarning();
-        this.incrementFilterCount();
-      }
-    }, 1000);
-  }
-
-  /**
-   * Hide warning overlay
-   */
-  hideWarning() {
-    if (this.warningOverlay) {
-      this.warningOverlay.remove();
-      this.warningOverlay = null;
-    }
-  }
-
-  /**
-   * Show AI adjustment notification
-   */
-  showAIAdjustment(
-    adjustment: AIAdjustment,
-    onAccept: () => void,
-    onReject: () => void
-  ) {
-    if (!this.container) return;
-
-    this.hideAdjustment();
-
-    this.adjustmentOverlay = document.createElement('div');
-    this.adjustmentOverlay.style.cssText = `
+  // Show content warning overlay (3-5 seconds before content)
+  showWarning(category: string, countdown: number, onShowAnyway: () => void, onKeepFiltered: () => void) {
+    const warningId = `warning-${Date.now()}`;
+    const warning = document.createElement('div');
+    warning.id = warningId;
+    warning.style.cssText = `
       position: absolute;
-      top: 16px;
-      right: 16px;
-      background: linear-gradient(135deg, rgba(139, 92, 246, 0.95), rgba(168, 85, 247, 0.9));
-      border: 1px solid rgba(167, 139, 250, 0.3);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      padding: 24px 32px;
       border-radius: 12px;
-      padding: 16px;
-      max-width: 300px;
+      border: 2px solid #f59e0b;
       pointer-events: auto;
-      font-family: 'Inter', system-ui, sans-serif;
-      animation: sentinella-fade-in 0.3s ease-out;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+      text-align: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      z-index: 10001;
+      min-width: 300px;
     `;
 
-    this.adjustmentOverlay.innerHTML = `
-      <div style="display: flex; align-items: start; gap: 12px;">
-        <span style="font-size: 24px;">🧠</span>
-        <div style="flex: 1;">
-          <div style="font-size: 13px; font-weight: 600; color: white; margin-bottom: 6px;">
-            Sentinella noticed a pattern
-          </div>
-          <div style="font-size: 12px; color: rgba(255, 255, 255, 0.85); line-height: 1.5; margin-bottom: 12px;">
-            ${adjustment.reason}
-          </div>
-          <div style="display: flex; gap: 8px;">
-            <button class="accept-btn" style="
-              flex: 1;
-              padding: 6px 12px;
-              background: white;
-              border: none;
-              border-radius: 6px;
-              color: #7c3aed;
-              font-size: 12px;
-              font-weight: 500;
-              cursor: pointer;
-            ">
-              ✓ Sounds right
-            </button>
-            <button class="reject-btn" style="
-              flex: 1;
-              padding: 6px 12px;
-              background: rgba(255, 255, 255, 0.1);
-              border: 1px solid rgba(255, 255, 255, 0.2);
-              border-radius: 6px;
-              color: white;
-              font-size: 12px;
-              font-weight: 500;
-              cursor: pointer;
-            ">
-              ✕ Undo
-            </button>
-          </div>
-        </div>
-        <button class="close-btn" style="
-          background: none;
+    warning.innerHTML = `
+      <div style="font-size: 24px; margin-bottom: 12px;">⚠️ CONTENT WARNING</div>
+      <div style="font-size: 18px; margin-bottom: 8px; color: #f59e0b;">${category}</div>
+      <div style="font-size: 14px; margin-bottom: 16px; opacity: 0.8;">Appearing in: <span id="countdown-${warningId}">${countdown}</span> seconds</div>
+      <div style="display: flex; gap: 12px; justify-content: center;">
+        <button id="show-anyway-${warningId}" style="
+          background: #10b981;
+          color: white;
           border: none;
-          color: rgba(255, 255, 255, 0.5);
+          padding: 8px 16px;
+          border-radius: 6px;
           cursor: pointer;
-          font-size: 16px;
-          padding: 0;
-        ">×</button>
+          font-weight: 600;
+        ">👁️ Show</button>
+        <button id="keep-filtered-${warningId}" style="
+          background: #6366f1;
+          color: white;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-weight: 600;
+        ">✓ Keep Hidden</button>
       </div>
     `;
 
-    const acceptBtn = this.adjustmentOverlay.querySelector('.accept-btn') as HTMLButtonElement;
-    const rejectBtn = this.adjustmentOverlay.querySelector('.reject-btn') as HTMLButtonElement;
-    const closeBtn = this.adjustmentOverlay.querySelector('.close-btn') as HTMLButtonElement;
+    this.overlayContainer?.appendChild(warning);
+    this.activeWarnings.set(warningId, warning);
 
-    acceptBtn.addEventListener('click', () => {
-      onAccept();
-      this.hideAdjustment();
+    // Update countdown
+    const countdownElement = warning.querySelector(`#countdown-${warningId}`);
+    const countdownInterval = setInterval(() => {
+      const remaining = parseFloat(countdownElement?.textContent || '0') - 0.1;
+      if (countdownElement) {
+        countdownElement.textContent = remaining.toFixed(1);
+      }
+      if (remaining <= 0) {
+        clearInterval(countdownInterval);
+      }
+    }, 100);
+
+    // Button handlers
+    warning.querySelector(`#show-anyway-${warningId}`)?.addEventListener('click', () => {
+      onShowAnyway();
+      this.hideWarning(warningId);
+      clearInterval(countdownInterval);
     });
 
-    rejectBtn.addEventListener('click', () => {
-      onReject();
-      this.hideAdjustment();
+    warning.querySelector(`#keep-filtered-${warningId}`)?.addEventListener('click', () => {
+      onKeepFiltered();
+      this.hideWarning(warningId);
+      clearInterval(countdownInterval);
     });
 
-    closeBtn.addEventListener('click', () => {
-      this.hideAdjustment();
-    });
-
-    this.container.appendChild(this.adjustmentOverlay);
-
-    // Auto-hide after 10 seconds
+    // Auto-hide after countdown
     setTimeout(() => {
-      if (this.adjustmentOverlay) {
-        onAccept(); // Implicit accept
-        this.hideAdjustment();
-      }
-    }, 10000);
+      this.hideWarning(warningId);
+      clearInterval(countdownInterval);
+    }, countdown * 1000);
   }
 
-  /**
-   * Hide AI adjustment overlay
-   */
-  hideAdjustment() {
-    if (this.adjustmentOverlay) {
-      this.adjustmentOverlay.remove();
-      this.adjustmentOverlay = null;
+  // Hide warning
+  hideWarning(warningId: string) {
+    const warning = this.activeWarnings.get(warningId);
+    if (warning && warning.parentElement) {
+      warning.parentElement.removeChild(warning);
+      this.activeWarnings.delete(warningId);
     }
   }
 
-  /**
-   * Increment and update filter count display
-   */
-  private incrementFilterCount() {
-    this.filteredCount++;
-    this.updateIndicator();
+  // Add reveal button to filtered region
+  addRevealButton(
+    detectionId: string,
+    bbox: { x: number; y: number; width: number; height: number },
+    onReveal: () => void
+  ) {
+    const button = document.createElement('button');
+    button.id = `reveal-${detectionId}`;
+    button.innerHTML = '👁️ Reveal';
+    button.style.cssText = `
+      position: absolute;
+      left: ${bbox.x}px;
+      top: ${bbox.y}px;
+      background: rgba(99, 102, 241, 0.9);
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      pointer-events: auto;
+      z-index: 10002;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    `;
+
+    button.addEventListener('click', onReveal);
+    this.overlayContainer?.appendChild(button);
+    this.revealButtons.set(detectionId, button);
   }
 
-  /**
-   * Update the indicator display
-   */
-  private updateIndicator() {
-    if (this.indicatorOverlay) {
-      const countEl = this.indicatorOverlay.querySelector('.filter-count');
-      if (countEl) {
-        countEl.textContent = `${this.filteredCount} filtered`;
-      }
+  // Remove reveal button
+  removeRevealButton(detectionId: string) {
+    const button = this.revealButtons.get(detectionId);
+    if (button && button.parentElement) {
+      button.parentElement.removeChild(button);
+      this.revealButtons.delete(detectionId);
     }
   }
 
-  /**
-   * Reset filter count
-   */
-  resetCount() {
-    this.filteredCount = 0;
-    this.updateIndicator();
+  // Show session stats indicator
+  showStatsIndicator(filteredCount: number) {
+    let indicator = document.getElementById('sentinella-stats-indicator');
+    
+    if (!indicator) {
+      indicator = document.createElement('div');
+      indicator.id = 'sentinella-stats-indicator';
+      indicator.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-size: 12px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        z-index: 10003;
+        pointer-events: none;
+      `;
+      document.body.appendChild(indicator);
+    }
+
+    indicator.textContent = `🛡️ ${filteredCount} filtered`;
   }
 
-  /**
-   * Cleanup
-   */
-  cleanup() {
-    this.hideWarning();
-    this.hideAdjustment();
-    this.container?.remove();
+  // Cleanup
+  destroy() {
+    this.activeWarnings.forEach(warning => {
+      if (warning.parentElement) {
+        warning.parentElement.removeChild(warning);
+      }
+    });
+    this.revealButtons.forEach(button => {
+      if (button.parentElement) {
+        button.parentElement.removeChild(button);
+      }
+    });
+    if (this.overlayContainer?.parentElement) {
+      this.overlayContainer.parentElement.removeChild(this.overlayContainer);
+    }
+    const indicator = document.getElementById('sentinella-stats-indicator');
+    if (indicator) {
+      indicator.remove();
+    }
   }
 }
-

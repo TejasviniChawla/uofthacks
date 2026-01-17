@@ -1,185 +1,135 @@
-import { WS_URL } from './constants';
-import { v4 as uuid } from './uuid';
-import type { WSMessage, FilterInstruction, Detection, AIAdjustment } from '../types';
+// WebSocket client for real-time communication with backend
 
-type MessageHandler = (message: WSMessage) => void;
+import { io, Socket } from 'socket.io-client';
+import type { Detection, FilterInstruction, WSMessage } from '@shared/types';
 
-class WebSocketClient {
-  private ws: WebSocket | null = null;
+const API_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
+
+export class WebSocketClient {
+  private socket: Socket | null = null;
+  private userId: string;
+  private streamId: string | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
-  private reconnectDelay = 1000;
-  private messageHandlers: Set<MessageHandler> = new Set();
-  private userId: string = '';
-  private platform: 'twitch' | 'youtube' | null = null;
 
-  /**
-   * Connect to the WebSocket server
-   */
-  connect(userId: string, platform: 'twitch' | 'youtube'): void {
+  constructor(userId: string) {
     this.userId = userId;
-    this.platform = platform;
-
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      return;
-    }
-
-    try {
-      this.ws = new WebSocket(WS_URL);
-
-      this.ws.onopen = () => {
-        console.log('[Sentinella] WebSocket connected');
-        this.reconnectAttempts = 0;
-      };
-
-      this.ws.onmessage = (event) => {
-        try {
-          const message: WSMessage = JSON.parse(event.data);
-          this.notifyHandlers(message);
-        } catch (error) {
-          console.error('[Sentinella] Failed to parse message:', error);
-        }
-      };
-
-      this.ws.onclose = () => {
-        console.log('[Sentinella] WebSocket closed');
-        this.attemptReconnect();
-      };
-
-      this.ws.onerror = (error) => {
-        console.error('[Sentinella] WebSocket error:', error);
-      };
-    } catch (error) {
-      console.error('[Sentinella] Failed to connect:', error);
-      this.attemptReconnect();
-    }
   }
 
-  /**
-   * Disconnect from the WebSocket server
-   */
-  disconnect(): void {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-  }
-
-  /**
-   * Send a frame for analysis
-   */
-  sendFrame(frame: string, timestamp: number): void {
-    this.send({
-      type: 'frame_analysis',
-      payload: {
-        frame,
-        timestamp,
-        userId: this.userId,
-        platform: this.platform,
-      },
-      timestamp: Date.now(),
-      messageId: uuid(),
-    });
-  }
-
-  /**
-   * Send audio for analysis
-   */
-  sendAudio(audio: string, timestamp: number): void {
-    this.send({
-      type: 'audio_analysis',
-      payload: {
-        audio,
-        timestamp,
-        userId: this.userId,
-      },
-      timestamp: Date.now(),
-      messageId: uuid(),
-    });
-  }
-
-  /**
-   * Send an override event
-   */
-  sendOverride(
-    category: string,
-    subcategory: string | undefined,
-    overrideType: 'reveal_once' | 'reveal_always' | 'reveal_hold'
-  ): void {
-    this.send({
-      type: 'override',
-      payload: {
-        category,
-        subcategory,
-        overrideType,
-      },
-      timestamp: Date.now(),
-      messageId: uuid(),
-    });
-  }
-
-  /**
-   * Request session stats
-   */
-  requestStats(): void {
-    this.send({
-      type: 'session_stats',
-      payload: {},
-      timestamp: Date.now(),
-      messageId: uuid(),
-    });
-  }
-
-  /**
-   * Subscribe to messages
-   */
-  onMessage(handler: MessageHandler): () => void {
-    this.messageHandlers.add(handler);
-    return () => this.messageHandlers.delete(handler);
-  }
-
-  /**
-   * Check if connected
-   */
-  isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
-  }
-
-  private send(message: WSMessage): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message));
-    } else {
-      console.warn('[Sentinella] WebSocket not connected, message dropped');
-    }
-  }
-
-  private notifyHandlers(message: WSMessage): void {
-    for (const handler of this.messageHandlers) {
+  connect(): Promise<void> {
+    return new Promise((resolve, reject) => {
       try {
-        handler(message);
+        this.socket = io(API_URL, {
+          transports: ['websocket'],
+          reconnection: true,
+          reconnectionAttempts: this.maxReconnectAttempts,
+          reconnectionDelay: 1000
+        });
+
+        this.socket.on('connect', () => {
+          console.log('✅ WebSocket connected');
+          this.reconnectAttempts = 0;
+          resolve();
+        });
+
+        this.socket.on('disconnect', () => {
+          console.log('❌ WebSocket disconnected');
+        });
+
+        this.socket.on('connect_error', (error) => {
+          console.error('WebSocket connection error:', error);
+          this.reconnectAttempts++;
+          if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            reject(error);
+          }
+        });
       } catch (error) {
-        console.error('[Sentinella] Handler error:', error);
+        reject(error);
       }
+    });
+  }
+
+  disconnect() {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = null;
     }
   }
 
-  private attemptReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[Sentinella] Max reconnection attempts reached');
-      return;
+  joinStream(streamId: string, platform: 'twitch' | 'youtube') {
+    if (!this.socket) {
+      throw new Error('WebSocket not connected');
     }
 
-    this.reconnectAttempts++;
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+    this.streamId = streamId;
+    this.socket.emit('join-stream', { streamId, platform, userId: this.userId });
+  }
 
-    console.log(`[Sentinella] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+  leaveStream() {
+    if (this.socket && this.streamId) {
+      this.socket.emit('leave-stream', { streamId: this.streamId });
+      this.streamId = null;
+    }
+  }
 
-    setTimeout(() => {
-      if (this.userId && this.platform) {
-        this.connect(this.userId, this.platform);
-      }
-    }, delay);
+  sendFrameAnalysis(frame: string, timestamp: number) {
+    if (!this.socket || !this.streamId) return;
+
+    this.socket.emit('frame_analysis', {
+      frame,
+      timestamp,
+      userId: this.userId,
+      streamId: this.streamId
+    });
+  }
+
+  sendAudioAnalysis(audio: string, timestamp: number) {
+    if (!this.socket || !this.streamId) return;
+
+    this.socket.emit('audio_analysis', {
+      audio,
+      timestamp,
+      userId: this.userId,
+      streamId: this.streamId
+    });
+  }
+
+  onFilterInstruction(callback: (instruction: FilterInstruction) => void) {
+    if (!this.socket) return;
+
+    this.socket.on('filter_instruction', (data: FilterInstruction) => {
+      callback(data);
+    });
+  }
+
+  onWarning(callback: (warning: { category: string; countdown: number }) => void) {
+    if (!this.socket) return;
+
+    this.socket.on('content_warning', (data: { category: string; countdown: number }) => {
+      callback(data);
+    });
+  }
+
+  onError(callback: (error: string) => void) {
+    if (!this.socket) return;
+
+    this.socket.on('error', (error: string) => {
+      callback(error);
+    });
+  }
+
+  sendOverride(detectionId: string, overrideType: 'reveal_once' | 'reveal_always') {
+    if (!this.socket || !this.streamId) return;
+
+    this.socket.emit('filter_override', {
+      detectionId,
+      overrideType,
+      userId: this.userId,
+      streamId: this.streamId
+    });
+  }
+
+  isConnected(): boolean {
+    return this.socket?.connected || false;
   }
 }
-
-export const wsClient = new WebSocketClient();

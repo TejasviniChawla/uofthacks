@@ -1,30 +1,52 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    viteStaticCopy({
+      targets: [
+        {
+          src: 'manifest.json',
+          dest: '.'
+        },
+        {
+          src: 'public/icons/*',
+          dest: 'icons'
+        }
+      ]
+    })
+  ],
   build: {
     outDir: 'dist',
-    emptyOutDir: true,
     rollupOptions: {
       input: {
-        popup: resolve(__dirname, 'src/popup/index.html'),
-        content: resolve(__dirname, 'src/content/content-script.ts'),
-        demo: resolve(__dirname, 'src/content/demo-mode.ts'),
-        background: resolve(__dirname, 'src/background/service-worker.ts'),
+        'popup/index': resolve(__dirname, 'src/popup/index.html'),
+        'background/service-worker': resolve(__dirname, 'src/background/service-worker.ts'),
+        'content/content-script': resolve(__dirname, 'src/content/content-script.ts')
       },
       output: {
-        entryFileNames: '[name].js',
-        chunkFileNames: '[name].js',
-        assetFileNames: '[name].[ext]',
-        format: 'es',
-      },
+        entryFileNames: (chunkInfo) => {
+          if (chunkInfo.name === 'background/service-worker') {
+            return 'background/service-worker.js';
+          }
+          if (chunkInfo.name === 'content/content-script') {
+            return 'content/content-script.js';
+          }
+          return '[name].js';
+        },
+        chunkFileNames: 'chunks/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash].[ext]'
+      }
     },
+    emptyOutDir: true
   },
   resolve: {
     alias: {
-      '@': resolve(__dirname, './src'),
-    },
-  },
+      '@': resolve(__dirname, 'src'),
+      '@shared': resolve(__dirname, '../../packages/shared/src')
+    }
+  }
 });

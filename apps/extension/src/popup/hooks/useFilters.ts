@@ -1,114 +1,77 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getActiveProfile, updateFilter, saveProfiles, getProfiles } from '../../lib/storage';
-import type { FilterConfig, FilterLevel, FilterCategory, UserProfile } from '../../types';
+import { useState, useEffect } from 'react';
+import type { UserPreferences, FilterCategory, FilterLevel } from '@shared/types';
+import { DEFAULT_FILTER_THRESHOLDS } from '@shared/constants';
 
 export function useFilters() {
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [preferences, setPreferences] = useState<UserPreferences | null>(null);
 
-  // Load initial profile
+  const loadPreferences = async () => {
+    return new Promise<void>((resolve) => {
+      chrome.storage.local.get(['preferences'], (result) => {
+        if (result.preferences) {
+          setPreferences(result.preferences);
+        } else {
+          // Set defaults
+          const defaultPrefs: UserPreferences = {
+            userId: `user_${Date.now()}`,
+            profileName: 'Default',
+            isDefault: true,
+            isLocked: false,
+            filters: {
+              profanity: { category: 'profanity', level: 'MEDIUM', enabled: true, threshold: DEFAULT_FILTER_THRESHOLDS.MEDIUM, action: 'bleep' },
+              violence: { category: 'violence', level: 'LOW', enabled: true, threshold: DEFAULT_FILTER_THRESHOLDS.LOW, action: 'blur' },
+              sexual: { category: 'sexual', level: 'HIGH', enabled: true, threshold: DEFAULT_FILTER_THRESHOLDS.HIGH, action: 'blur' },
+              jumpscares: { category: 'jumpscares', level: 'HIGH', enabled: true, threshold: DEFAULT_FILTER_THRESHOLDS.HIGH, action: 'dim' },
+              flashing: { category: 'flashing', level: 'HIGH', enabled: true, threshold: DEFAULT_FILTER_THRESHOLDS.HIGH, action: 'dim' },
+              spoilers: { category: 'spoilers', level: 'OFF', enabled: false, threshold: DEFAULT_FILTER_THRESHOLDS.OFF, action: 'blur' },
+              loud_audio: { category: 'loud_audio', level: 'MEDIUM', enabled: true, threshold: DEFAULT_FILTER_THRESHOLDS.MEDIUM, action: 'normalize' },
+              hate_speech: { category: 'hate_speech', level: 'HIGH', enabled: true, threshold: DEFAULT_FILTER_THRESHOLDS.HIGH, action: 'mute' }
+            },
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          setPreferences(defaultPrefs);
+          chrome.storage.local.set({ preferences: defaultPrefs });
+        }
+        resolve();
+      });
+    });
+  };
+
+  const updateFilter = (category: FilterCategory, level: FilterLevel) => {
+    if (!preferences) return;
+
+    const updated = {
+      ...preferences,
+      filters: {
+        ...preferences.filters,
+        [category]: {
+          ...preferences.filters[category],
+          level,
+          enabled: level !== 'OFF',
+          threshold: DEFAULT_FILTER_THRESHOLDS[level]
+        }
+      },
+      updatedAt: new Date().toISOString()
+    };
+
+    setPreferences(updated);
+    chrome.storage.local.set({ preferences: updated });
+
+    // Notify content script
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          type: 'PREFERENCES_UPDATED',
+          preferences: updated
+        });
+      }
+    });
+  };
+
   useEffect(() => {
-    loadProfile();
+    loadPreferences();
   }, []);
 
-  const loadProfile = async () => {
-    try {
-      setLoading(true);
-      const activeProfile = await getActiveProfile();
-      setProfile(activeProfile);
-      setError(null);
-    } catch (e) {
-      setError('Failed to load profile');
-      console.error('Failed to load profile:', e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Update a single filter
-  const setFilterLevel = useCallback(async (category: FilterCategory, level: FilterLevel) => {
-    if (!profile) return;
-
-    try {
-      // Update local state immediately
-      const updatedFilters = profile.filters.map(f =>
-        f.category === category ? { ...f, level } : f
-      );
-      setProfile({ ...profile, filters: updatedFilters });
-
-      // Persist to storage
-      await updateFilter(category, { level });
-    } catch (e) {
-      console.error('Failed to update filter:', e);
-      // Rollback on error
-      loadProfile();
-    }
-  }, [profile]);
-
-  // Update filter threshold
-  const setFilterThreshold = useCallback(async (category: FilterCategory, threshold: number) => {
-    if (!profile) return;
-
-    try {
-      const updatedFilters = profile.filters.map(f =>
-        f.category === category ? { ...f, threshold } : f
-      );
-      setProfile({ ...profile, filters: updatedFilters });
-      await updateFilter(category, { threshold });
-    } catch (e) {
-      console.error('Failed to update threshold:', e);
-      loadProfile();
-    }
-  }, [profile]);
-
-  // Apply a preset
-  const applyPreset = useCallback(async (preset: Record<FilterCategory, FilterLevel>) => {
-    if (!profile) return;
-
-    try {
-      const updatedFilters = profile.filters.map(f => ({
-        ...f,
-        level: preset[f.category] || f.level,
-      }));
-
-      const updatedProfile = { ...profile, filters: updatedFilters };
-      setProfile(updatedProfile);
-
-      // Save all profiles with updated active profile
-      const profiles = await getProfiles();
-      const updated = profiles.map(p =>
-        p.id === profile.id ? updatedProfile : p
-      );
-      await saveProfiles(updated);
-    } catch (e) {
-      console.error('Failed to apply preset:', e);
-      loadProfile();
-    }
-  }, [profile]);
-
-  // Get filter by category
-  const getFilter = useCallback((category: FilterCategory): FilterConfig | undefined => {
-    return profile?.filters.find(f => f.category === category);
-  }, [profile]);
-
-  // Check if any filters are active
-  const hasActiveFilters = profile?.filters.some(f => f.level !== 'off') ?? false;
-
-  // Get count of active filters
-  const activeFilterCount = profile?.filters.filter(f => f.level !== 'off').length ?? 0;
-
-  return {
-    profile,
-    filters: profile?.filters ?? [],
-    loading,
-    error,
-    setFilterLevel,
-    setFilterThreshold,
-    applyPreset,
-    getFilter,
-    hasActiveFilters,
-    activeFilterCount,
-    reload: loadProfile,
-  };
+  return { preferences, updateFilter, loadPreferences };
 }

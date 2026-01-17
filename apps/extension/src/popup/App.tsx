@@ -1,173 +1,147 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FilterSlider } from './components/FilterSlider';
 import { ProfileSelector } from './components/ProfileSelector';
 import { SessionStats } from './components/SessionStats';
 import { AILearningPanel } from './components/AILearningPanel';
-import { Header } from './components/Header';
-import { QuickPresets } from './components/QuickPresets';
-import { getActiveProfile, getSessionStats, getLearnedPreferences } from '../lib/storage';
-import type { UserProfile, SessionStats as SessionStatsType, LearnedPreference, FilterCategory } from '../types';
-import { FILTER_ICONS, FILTER_LABELS } from '../lib/constants';
+import { useFilters } from './hooks/useFilters';
+import { useSessionStats } from './hooks/useSessionStats';
+import type { UserPreferences, FilterCategory } from '@shared/types';
 
-type Tab = 'filters' | 'stats' | 'ai';
-
-export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('filters');
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [stats, setStats] = useState<SessionStatsType | null>(null);
-  const [learnedPrefs, setLearnedPrefs] = useState<LearnedPreference[]>([]);
-  const [isActive, setIsActive] = useState(true);
-  const [currentSite, setCurrentSite] = useState<string>('');
+function App() {
+  const { preferences, updateFilter, loadPreferences } = useFilters();
+  const { stats, refreshStats } = useSessionStats();
+  const [activeTab, setActiveTab] = useState<'filters' | 'stats' | 'learning'>('filters');
+  const [isActive, setIsActive] = useState(false);
+  const [currentUrl, setCurrentUrl] = useState('');
 
   useEffect(() => {
-    loadData();
-    checkCurrentTab();
+    loadPreferences();
+    refreshStats();
+    checkActiveStatus();
+    
+    // Refresh stats every 2 seconds
+    const interval = setInterval(refreshStats, 2000);
+    return () => clearInterval(interval);
   }, []);
 
-  const loadData = async () => {
-    const [profileData, statsData, learnedData] = await Promise.all([
-      getActiveProfile(),
-      getSessionStats(),
-      getLearnedPreferences(),
-    ]);
-    setProfile(profileData);
-    setStats(statsData);
-    setLearnedPrefs(learnedData);
-  };
-
-  const checkCurrentTab = async () => {
+  const checkActiveStatus = async () => {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab?.url) {
+      if (tab.url) {
         const url = new URL(tab.url);
-        if (url.hostname.includes('twitch.tv')) {
-          setCurrentSite('twitch.tv');
-          setIsActive(true);
-        } else if (url.hostname.includes('youtube.com')) {
-          setCurrentSite('youtube.com');
-          setIsActive(true);
-        } else {
-          setCurrentSite(url.hostname);
-          setIsActive(false);
-        }
+        setCurrentUrl(url.hostname);
+        setIsActive(url.hostname.includes('twitch.tv') || url.hostname.includes('youtube.com'));
       }
-    } catch (e) {
-      console.error('Failed to get current tab:', e);
+    } catch (error) {
+      console.error('Error checking active status:', error);
     }
   };
 
-  const handleProfileChange = (newProfile: UserProfile) => {
-    setProfile(newProfile);
-  };
-
-  const handleFilterChange = (category: FilterCategory, level: string) => {
-    if (!profile) return;
-    
-    const updatedFilters = profile.filters.map(f => 
-      f.category === category ? { ...f, level: level as any } : f
+  if (!preferences) {
+    return (
+      <div className="p-4 text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-sentinella-primary mx-auto"></div>
+        <p className="mt-2 text-sm text-gray-600">Loading...</p>
+      </div>
     );
-    
-    setProfile({ ...profile, filters: updatedFilters });
-  };
+  }
 
   return (
-    <div className="flex flex-col min-h-[500px] bg-gradient-to-br from-dark-900 via-dark-900 to-[#0a1628]">
-      <Header 
-        isActive={isActive} 
-        currentSite={currentSite}
-        profile={profile}
-        onProfileChange={handleProfileChange}
-      />
-
-      {/* Tab Navigation */}
-      <div className="flex border-b border-dark-700">
-        <TabButton 
-          active={activeTab === 'filters'} 
-          onClick={() => setActiveTab('filters')}
-        >
-          ⚡ Filters
-        </TabButton>
-        <TabButton 
-          active={activeTab === 'stats'} 
-          onClick={() => setActiveTab('stats')}
-        >
-          📊 Stats
-        </TabButton>
-        <TabButton 
-          active={activeTab === 'ai'} 
-          onClick={() => setActiveTab('ai')}
-        >
-          🧠 AI Learning
-        </TabButton>
+    <div className="w-full min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-sentinella-primary to-sentinella-secondary text-white p-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold">SENTINELLA</h1>
+          <ProfileSelector />
+        </div>
+        {isActive && (
+          <div className="mt-2 text-sm opacity-90">
+            ⚡ ACTIVE on {currentUrl}
+          </div>
+        )}
+        {!isActive && (
+          <div className="mt-2 text-sm opacity-75">
+            Visit Twitch or YouTube to activate
+          </div>
+        )}
       </div>
 
-      {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto">
-        {activeTab === 'filters' && profile && (
-          <div className="p-4 space-y-4">
-            <QuickPresets onApply={loadData} />
-            
-            <div className="space-y-3">
-              <h3 className="text-xs font-semibold text-dark-400 uppercase tracking-wider">
-                Quick Filters
-              </h3>
-              {profile.filters.map((filter) => (
-                <FilterSlider
-                  key={filter.category}
-                  icon={FILTER_ICONS[filter.category]}
-                  label={FILTER_LABELS[filter.category]}
-                  category={filter.category}
-                  level={filter.level}
-                  onChange={(level) => handleFilterChange(filter.category, level)}
-                />
-              ))}
+      {/* Tabs */}
+      <div className="flex border-b border-gray-200">
+        <button
+          onClick={() => setActiveTab('filters')}
+          className={`flex-1 py-2 text-sm font-medium ${
+            activeTab === 'filters'
+              ? 'text-sentinella-primary border-b-2 border-sentinella-primary'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          Filters
+        </button>
+        <button
+          onClick={() => setActiveTab('stats')}
+          className={`flex-1 py-2 text-sm font-medium ${
+            activeTab === 'stats'
+              ? 'text-sentinella-primary border-b-2 border-sentinella-primary'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          Stats
+        </button>
+        <button
+          onClick={() => setActiveTab('learning')}
+          className={`flex-1 py-2 text-sm font-medium ${
+            activeTab === 'learning'
+              ? 'text-sentinella-primary border-b-2 border-sentinella-primary'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          AI Learning
+        </button>
+      </div>
+
+      {/* Content */}
+      <div className="p-4">
+        {activeTab === 'filters' && (
+          <div className="space-y-4">
+            <h2 className="text-lg font-semibold mb-4">Quick Filters</h2>
+            {(['profanity', 'violence', 'jumpscares', 'flashing', 'sexual'] as FilterCategory[]).map((category) => (
+              <FilterSlider
+                key={category}
+                category={category}
+                config={preferences.filters[category]}
+                onChange={(level) => updateFilter(category, level)}
+              />
+            ))}
+            <div className="mt-6 space-y-2">
+              <h3 className="text-sm font-semibold text-gray-700">Quick Presets</h3>
+              <div className="grid grid-cols-2 gap-2">
+                <button className="px-3 py-2 bg-blue-100 text-blue-700 rounded text-sm font-medium hover:bg-blue-200">
+                  Gaming
+                </button>
+                <button className="px-3 py-2 bg-green-100 text-green-700 rounded text-sm font-medium hover:bg-green-200">
+                  Family
+                </button>
+                <button className="px-3 py-2 bg-red-100 text-red-700 rounded text-sm font-medium hover:bg-red-200">
+                  Maximum
+                </button>
+                <button className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm font-medium hover:bg-gray-200">
+                  Custom
+                </button>
+              </div>
             </div>
+            <button className="w-full mt-4 px-4 py-2 bg-gray-200 text-gray-700 rounded text-sm font-medium hover:bg-gray-300">
+              ⚙️ Advanced Settings
+            </button>
           </div>
         )}
 
-        {activeTab === 'stats' && stats && (
-          <SessionStats stats={stats} />
-        )}
+        {activeTab === 'stats' && <SessionStats stats={stats} />}
 
-        {activeTab === 'ai' && (
-          <AILearningPanel preferences={learnedPrefs} onRefresh={loadData} />
-        )}
-      </div>
-
-      {/* Footer */}
-      <div className="p-3 border-t border-dark-700 bg-dark-900/50">
-        <div className="flex items-center justify-between text-xs text-dark-400">
-          <span>Buffer: 5s</span>
-          <span className="flex items-center gap-1">
-            <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-green-500' : 'bg-dark-500'}`} />
-            {isActive ? 'Active' : 'Inactive'}
-          </span>
-          <span>Latency: ~1.2s</span>
-        </div>
+        {activeTab === 'learning' && <AILearningPanel />}
       </div>
     </div>
   );
 }
 
-function TabButton({ 
-  active, 
-  onClick, 
-  children 
-}: { 
-  active: boolean; 
-  onClick: () => void; 
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex-1 py-3 text-sm font-medium transition-colors ${
-        active 
-          ? 'text-sentinel-400 border-b-2 border-sentinel-400 bg-sentinel-400/5' 
-          : 'text-dark-400 hover:text-dark-200 hover:bg-dark-800/50'
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
+export default App;

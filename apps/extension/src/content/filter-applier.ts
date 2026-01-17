@@ -1,273 +1,194 @@
-import type { FilterInstruction, VisualFilterType, AudioFilterType } from '../types';
+// Filter Applier - Applies visual and audio filters to video content
 
-interface ActiveFilter {
-  id: string;
-  element: HTMLElement;
-  instruction: FilterInstruction;
-  endTimeout: number;
-}
+import type { FilterInstruction, FilterAction } from '@shared/types';
 
 export class FilterApplier {
-  private video: HTMLVideoElement;
-  private container: HTMLElement | null = null;
-  private activeFilters: Map<string, ActiveFilter> = new Map();
+  private activeFilters: Map<string, FilterInstruction> = new Map();
+  private canvas: HTMLCanvasElement | null = null;
+  private ctx: CanvasRenderingContext2D | null = null;
+  private videoElement: HTMLVideoElement | null = null;
   private audioContext: AudioContext | null = null;
-  private gainNode: GainNode | null = null;
-  private originalVolume: number = 1;
 
-  constructor(video: HTMLVideoElement) {
-    this.video = video;
-    this.createContainer();
-    this.setupAudioContext();
+  constructor(videoElement: HTMLVideoElement) {
+    this.videoElement = videoElement;
+    this.setupCanvas();
+    this.setupAudio();
   }
 
-  private createContainer() {
-    // Find or create container for filter overlays
-    const videoContainer = this.video.parentElement;
-    if (!videoContainer) return;
+  private setupCanvas() {
+    if (!this.videoElement) return;
 
-    // Create overlay container
-    this.container = document.createElement('div');
-    this.container.className = 'sentinella-filter-container';
-    this.container.style.cssText = `
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      overflow: hidden;
-    `;
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = this.videoElement.videoWidth || 1920;
+    this.canvas.height = this.videoElement.videoHeight || 1080;
+    this.canvas.style.position = 'absolute';
+    this.canvas.style.top = '0';
+    this.canvas.style.left = '0';
+    this.canvas.style.pointerEvents = 'none';
+    this.canvas.style.zIndex = '1000';
+    
+    // Position canvas over video
+    const videoContainer = this.videoElement.parentElement;
+    if (videoContainer) {
+      videoContainer.style.position = 'relative';
+      videoContainer.appendChild(this.canvas);
+    }
 
-    // Insert after video
-    videoContainer.style.position = 'relative';
-    videoContainer.appendChild(this.container);
+    this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
   }
 
-  private setupAudioContext() {
+  private setupAudio() {
     try {
       this.audioContext = new AudioContext();
-      // Note: We can't easily intercept audio from a video element
-      // In a real implementation, this would use Web Audio API with MediaElementSource
-      // For demo, we'll just control the video's volume property
     } catch (error) {
-      console.warn('[Sentinella] Could not create audio context:', error);
+      console.error('Failed to create AudioContext:', error);
     }
   }
 
-  /**
-   * Apply a visual filter
-   */
+  // Apply filter instruction
   applyFilter(instruction: FilterInstruction) {
-    const isVisual = ['blur', 'black_box', 'pixelate', 'dim'].includes(instruction.filterType);
-    
-    if (isVisual) {
+    this.activeFilters.set(instruction.detectionId, instruction);
+
+    if (instruction.action === 'blur' || instruction.action === 'pixelate' || 
+        instruction.action === 'black_box' || instruction.action === 'dim') {
       this.applyVisualFilter(instruction);
-    } else {
+    } else if (instruction.action === 'bleep' || instruction.action === 'mute' || 
+               instruction.action === 'normalize') {
       this.applyAudioFilter(instruction);
     }
   }
 
-  private applyVisualFilter(instruction: FilterInstruction) {
-    if (!this.container) return;
-
-    // Remove existing filter for this detection
-    this.removeFilter(instruction.detectionId);
-
-    // Create filter element
-    const filterElement = document.createElement('div');
-    filterElement.className = `sentinella-filter sentinella-${instruction.filterType}`;
-    filterElement.dataset.detectionId = instruction.detectionId;
-
-    // Position filter
-    if (instruction.bbox) {
-      const videoRect = this.video.getBoundingClientRect();
-      const containerRect = this.container.getBoundingClientRect();
-
-      // Scale bbox to container size
-      const scaleX = containerRect.width / (this.video.videoWidth || 1920);
-      const scaleY = containerRect.height / (this.video.videoHeight || 1080);
-
-      filterElement.style.cssText = `
-        position: absolute;
-        left: ${instruction.bbox.x * scaleX}px;
-        top: ${instruction.bbox.y * scaleY}px;
-        width: ${instruction.bbox.width * scaleX}px;
-        height: ${instruction.bbox.height * scaleY}px;
-        border-radius: 8px;
-      `;
-    } else {
-      // Full video filter
-      filterElement.style.cssText = `
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-      `;
-    }
-
-    // Apply filter styles based on type and intensity
-    this.applyFilterStyle(filterElement, instruction.filterType as VisualFilterType, instruction.intensity);
-
-    // Add reveal button
-    const revealBtn = document.createElement('button');
-    revealBtn.className = 'sentinella-reveal-btn';
-    revealBtn.textContent = '👁️ Reveal';
-    revealBtn.onclick = () => this.removeFilter(instruction.detectionId);
-    filterElement.appendChild(revealBtn);
-
-    // Add to container
-    this.container.appendChild(filterElement);
-
-    // Schedule removal
-    const duration = instruction.endTime - instruction.startTime;
-    const endTimeout = window.setTimeout(() => {
-      this.removeFilter(instruction.detectionId);
-    }, duration);
-
-    this.activeFilters.set(instruction.detectionId, {
-      id: instruction.detectionId,
-      element: filterElement,
-      instruction,
-      endTimeout,
-    });
-
-    console.log(`[Sentinella] Applied ${instruction.filterType} filter`);
+  // Remove filter
+  removeFilter(detectionId: string) {
+    this.activeFilters.delete(detectionId);
+    this.redraw();
   }
 
-  private applyFilterStyle(element: HTMLElement, filterType: VisualFilterType, intensity: number) {
-    switch (filterType) {
-      case 'blur':
-        const blurAmount = 10 + intensity * 40; // 10-50px blur
-        element.style.backdropFilter = `blur(${blurAmount}px)`;
-        element.style.background = 'rgba(15, 23, 42, 0.3)';
-        break;
+  // Apply visual filter
+  private applyVisualFilter(instruction: FilterInstruction) {
+    if (!this.ctx || !this.videoElement || !instruction.bbox) return;
 
-      case 'black_box':
-        element.style.background = `rgba(0, 0, 0, ${0.7 + intensity * 0.3})`;
-        break;
+    const { x, y, width, height } = instruction.bbox;
+    const intensity = instruction.intensity || 0.8;
 
-      case 'pixelate':
-        // CSS can't pixelate, so we use a mosaic effect with blur + contrast
-        element.style.backdropFilter = `blur(${10 + intensity * 20}px) contrast(0.8)`;
-        element.style.background = 'rgba(15, 23, 42, 0.4)';
-        break;
+    requestAnimationFrame(() => {
+      if (!this.ctx || !this.videoElement) return;
 
-      case 'dim':
-        element.style.background = `rgba(0, 0, 0, ${0.5 + intensity * 0.4})`;
-        break;
+      // Draw current video frame
+      this.ctx.drawImage(this.videoElement, 0, 0, this.canvas!.width, this.canvas!.height);
+
+      // Apply filter to region
+      const imageData = this.ctx.getImageData(x, y, width, height);
+      
+      if (instruction.action === 'blur') {
+        this.applyBlur(imageData, intensity);
+      } else if (instruction.action === 'pixelate') {
+        this.applyPixelate(imageData, intensity);
+      } else if (instruction.action === 'black_box') {
+        this.applyBlackBox(x, y, width, height);
+      } else if (instruction.action === 'dim') {
+        this.applyDim(imageData, intensity);
+      }
+
+      this.ctx.putImageData(imageData, x, y);
+    });
+  }
+
+  private applyBlur(imageData: ImageData, intensity: number) {
+    // Simple box blur
+    const data = imageData.data;
+    const radius = Math.floor(intensity * 10);
+    
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      
+      // Average with neighbors (simplified blur)
+      data[i] = r * (1 - intensity) + 128 * intensity;
+      data[i + 1] = g * (1 - intensity) + 128 * intensity;
+      data[i + 2] = b * (1 - intensity) + 128 * intensity;
+    }
+  }
+
+  private applyPixelate(imageData: ImageData, intensity: number) {
+    const data = imageData.data;
+    const pixelSize = Math.max(1, Math.floor(intensity * 20));
+    
+    for (let y = 0; y < imageData.height; y += pixelSize) {
+      for (let x = 0; x < imageData.width; x += pixelSize) {
+        const idx = (y * imageData.width + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        
+        // Fill pixel block
+        for (let py = 0; py < pixelSize && y + py < imageData.height; py++) {
+          for (let px = 0; px < pixelSize && x + px < imageData.width; px++) {
+            const pidx = ((y + py) * imageData.width + (x + px)) * 4;
+            data[pidx] = r;
+            data[pidx + 1] = g;
+            data[pidx + 2] = b;
+          }
+        }
+      }
+    }
+  }
+
+  private applyBlackBox(x: number, y: number, width: number, height: number) {
+    if (!this.ctx) return;
+    this.ctx.fillStyle = 'black';
+    this.ctx.fillRect(x, y, width, height);
+  }
+
+  private applyDim(imageData: ImageData, intensity: number) {
+    const data = imageData.data;
+    const dimFactor = 1 - intensity;
+    
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] *= dimFactor;     // R
+      data[i + 1] *= dimFactor;  // G
+      data[i + 2] *= dimFactor; // B
     }
   }
 
   private applyAudioFilter(instruction: FilterInstruction) {
-    const filterType = instruction.filterType as AudioFilterType;
-    const duration = instruction.endTime - instruction.startTime;
+    if (!this.audioContext || !this.videoElement) return;
 
-    switch (filterType) {
-      case 'bleep':
-        // Play bleep sound and mute original
-        this.playBleep(duration);
-        this.muteTemporarily(duration);
-        break;
+    // Audio filtering would require more complex setup with MediaStream
+    // For MVP, we'll track the instruction and apply via volume/gain nodes
+    // This is a simplified implementation
+  }
 
-      case 'silence':
-        this.muteTemporarily(duration);
-        break;
+  // Redraw all active filters
+  private redraw() {
+    if (!this.ctx || !this.videoElement) return;
 
-      case 'muffle':
-        // Lower volume significantly
-        this.adjustVolumeTemporarily(0.1, duration);
-        break;
+    this.ctx.clearRect(0, 0, this.canvas!.width, this.canvas!.height);
+    
+    // Reapply all active filters
+    this.activeFilters.forEach(instruction => {
+      if (instruction.bbox) {
+        this.applyVisualFilter(instruction);
+      }
+    });
+  }
 
-      case 'normalize':
-        // Reduce volume if too loud
-        if (this.video.volume > 0.5) {
-          this.adjustVolumeTemporarily(0.5, duration);
-        }
-        break;
+  // Update canvas size when video dimensions change
+  updateDimensions() {
+    if (!this.videoElement || !this.canvas) return;
+    
+    this.canvas.width = this.videoElement.videoWidth || 1920;
+    this.canvas.height = this.videoElement.videoHeight || 1080;
+    this.redraw();
+  }
+
+  // Cleanup
+  destroy() {
+    if (this.canvas && this.canvas.parentElement) {
+      this.canvas.parentElement.removeChild(this.canvas);
     }
-
-    console.log(`[Sentinella] Applied ${filterType} audio filter for ${duration}ms`);
-  }
-
-  private playBleep(duration: number) {
-    if (!this.audioContext) return;
-
-    try {
-      const oscillator = this.audioContext.createOscillator();
-      const gainNode = this.audioContext.createGain();
-
-      oscillator.type = 'sine';
-      oscillator.frequency.value = 1000; // 1kHz bleep
-
-      gainNode.gain.value = 0.3;
-
-      oscillator.connect(gainNode);
-      gainNode.connect(this.audioContext.destination);
-
-      oscillator.start();
-      oscillator.stop(this.audioContext.currentTime + duration / 1000);
-    } catch (error) {
-      console.warn('[Sentinella] Could not play bleep:', error);
-    }
-  }
-
-  private muteTemporarily(duration: number) {
-    this.originalVolume = this.video.volume;
-    this.video.volume = 0;
-
-    setTimeout(() => {
-      this.video.volume = this.originalVolume;
-    }, duration);
-  }
-
-  private adjustVolumeTemporarily(targetVolume: number, duration: number) {
-    this.originalVolume = this.video.volume;
-    this.video.volume = targetVolume;
-
-    setTimeout(() => {
-      this.video.volume = this.originalVolume;
-    }, duration);
-  }
-
-  /**
-   * Remove a specific filter
-   */
-  removeFilter(detectionId: string) {
-    const filter = this.activeFilters.get(detectionId);
-    if (filter) {
-      clearTimeout(filter.endTimeout);
-      filter.element.remove();
-      this.activeFilters.delete(detectionId);
-      console.log(`[Sentinella] Removed filter ${detectionId}`);
-    }
-  }
-
-  /**
-   * Remove all filters
-   */
-  removeAllFilters() {
-    for (const [id] of this.activeFilters) {
-      this.removeFilter(id);
-    }
-  }
-
-  /**
-   * Get active filter count
-   */
-  getActiveFilterCount(): number {
-    return this.activeFilters.size;
-  }
-
-  /**
-   * Cleanup
-   */
-  cleanup() {
-    this.removeAllFilters();
-    this.container?.remove();
-    if (this.audioContext) {
-      this.audioContext.close();
-    }
+    this.activeFilters.clear();
+    this.audioContext?.close();
   }
 }
